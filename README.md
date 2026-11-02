@@ -1,216 +1,183 @@
 # Host Check
 
-A lightweight Bash-based server accessibility diagnostic tool for Linux.
+A small, read-only Bash utility for checking whether a host responds and whether one specified TCP port is reachable.
 
-`host_check.sh` checks whether a remote host is reachable and whether a specified TCP port accepts connections. It displays the actual command output, provides a basic interpretation, and automatically saves a timestamped diagnostic report.
-
-Designed for simple infrastructure troubleshooting without requiring specialist network diagnostic packages.
-
-## Features
-
-- IPv4 address and hostname support.
-- Optional TCP port selection (default: `22`).
-- Hostname resolution using `getent`.
-- Local routing information using `ip`.
-- ICMP reachability checks using `ping`.
-- TCP connectivity testing using Bash `/dev/tcp`.
-- Passive SSH banner detection, including non-standard SSH ports.
-- Gateway and ARP/NDP information where available.
-- Reasonable timeouts and a limited retry for TCP timeouts.
-- Complete raw command output displayed in the terminal.
-- Automatic timestamped text report generation.
-- Evidence-based results that do not automatically classify a timeout as a server outage.
-
-## Requirements
-
-### Required
-
-- Linux
-- Bash 4 or newer
-- GNU-compatible `timeout`
-- Standard command-line utilities: `date`, `mktemp`, `awk`, `sed`, `grep`, and other standard core utilities.
-
-### Optional
-
-- `ping` – ICMP connectivity checks.
-- `ip` – routing and gateway information.
-- `getent` – hostname resolution.
-- `nc` – TCP fallback if Bash `/dev/tcp` is unavailable.
-
-The script does not install packages automatically and does not require root privileges for normal operation.
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/host-check.git
-```
-
-Enter the directory:
-
-```bash
-cd host-check
-```
-
-Make the script executable:
-
-```bash
-chmod +x host_check.sh
-```
-
-Check Bash syntax:
-
-```bash
-bash -n host_check.sh
-```
+It is designed for everyday Linux server troubleshooting. It uses common Linux tools and Bash functionality rather than requiring specialist network-scanning or packet-capture packages.
 
 ## Usage
 
-The tool accepts one required argument and one optional argument.
-
 ```bash
-./host_check.sh <IP-or-hostname> [port]
+./host_check.sh <IPv4-or-hostname> [port]
 ```
 
-### Examples
+The port is optional and defaults to `22`.
 
-Check a server using the default port 22:
+Examples:
 
 ```bash
 ./host_check.sh 192.168.1.100
-```
-
-Check SSH on a non-standard port:
-
-```bash
 ./host_check.sh 192.168.1.100 2222
-```
-
-Check a hostname:
-
-```bash
 ./host_check.sh example.com
-```
-
-Check HTTPS connectivity:
-
-```bash
 ./host_check.sh example.com 443
 ```
 
 No flags, configuration files, or interactive prompts are required.
 
-## Diagnostic checks
+## Install as the `hostcheck` command
 
-The script performs the following checks in sequence:
+You can install the script into your personal `~/.local/bin` directory. This does not require `sudo`.
 
-| Check | Utility | Purpose |
-|---|---|---|
-| Input validation | Bash | Validates the IP/hostname and port |
-| DNS resolution | `getent` | Resolves hostnames |
-| Local routing | `ip route get` | Identifies the route to the target |
-| ICMP connectivity | `ping` | Checks whether the target responds to ping |
-| TCP connectivity | Bash `/dev/tcp` | Attempts a TCP connection to the specified port |
-| SSH banner | Bash TCP connection | Passively checks for an SSH protocol banner |
-| Gateway | `ip` and `ping` | Checks gateway reachability where applicable |
-| ARP/NDP | `ip` | Displays available neighbour information |
+From the directory containing `host_check.sh`, run:
 
-### Timeout behaviour
+```bash
+mkdir -p "$HOME/.local/bin"
+install -m 755 host_check.sh "$HOME/.local/bin/hostcheck"
+```
 
-| Check | Limit |
-|---|---|
-| Ping | 3 attempts, up to 5 seconds each |
-| TCP connection | Up to 10 seconds |
-| TCP retry | One retry after a 10-second delay if the first attempt times out |
-| SSH banner | Up to 3 seconds |
+Make sure `~/.local/bin` is on your `PATH`. For Bash, run:
 
-These limits are fixed defaults in the current implementation.
+```bash
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" || \
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+If you use a login shell that reads `~/.profile` instead, add the same `export PATH=...` line there. Open a new terminal or run `source ~/.bashrc` after updating your Bash configuration.
+
+Verify the installation:
+
+```bash
+command -v hostcheck
+hostcheck 1.1.1.1
+```
+
+Now you can run it from any directory:
+
+```bash
+hostcheck 192.168.1.100
+hostcheck 192.168.1.100 2222
+hostcheck example.com 443
+```
+
+### Updating the installed command
+
+After downloading or pulling a newer version of the repository, run this from the updated project directory:
+
+```bash
+install -m 755 host_check.sh "$HOME/.local/bin/hostcheck"
+```
+
+This replaces the installed copy with the new version.
+
+### Uninstalling
+
+```bash
+rm -f "$HOME/.local/bin/hostcheck"
+```
+
+This removes the command but does not delete the repository or its source script.
+
+## What it checks
+
+The script performs these checks in sequence:
+
+1. Validates the target and optional port.
+2. Resolves a hostname with `getent` (when the target is a hostname).
+3. Displays the local route using `ip route get`, when available.
+4. Sends three ICMP ping requests, with up to five seconds per request.
+5. Attempts a TCP connection to the specified port using Bash `/dev/tcp` (up to ten seconds).
+6. If the TCP connection succeeds, passively listens briefly for a service banner. It recognises an SSH banner on any supplied port; it does not send a login or application request.
+7. Displays default-gateway and ARP/NDP neighbour information where available.
+8. Prints a final evidence-based summary.
+
+If the first TCP attempt times out, the script waits ten seconds and retries once. It does not scan other ports.
 
 ## Output and reports
 
-Every diagnostic check displays:
+Each check displays:
 
 - Check name.
 - Command executed.
 - Raw command output.
-- Exit code.
-- Result classification.
-- Short interpretation.
+- Exit status.
+- Result and a short interpretation.
 
-A complete copy of the output is automatically saved in the current working directory.
-
-Example filename:
+The complete output is also saved in the current directory as a timestamped text file, for example:
 
 ```text
 host_check_192.168.1.100_20261102_143000.txt
 ```
 
-The report is created with restrictive file permissions and existing reports are not overwritten.
+Existing reports are not overwritten. Reports may contain internal IP addresses and infrastructure details; review them before sharing.
+
+## Dependencies
+
+Required:
+
+- Bash 4 or newer.
+- `timeout`.
+- Standard utilities: `date`, `mktemp`, `awk`, `sed`, `grep`, and `hostname`.
+
+Optional:
+
+- `ping` for ICMP checks.
+- `ip` for route, gateway, and neighbour information.
+- `getent` for hostname resolution.
+- `nc` only as a fallback if Bash TCP support is unavailable.
+
+The script does not install packages and does not require root privileges for normal use. If an optional utility is missing, the corresponding check is reported as not performed where possible.
 
 ## Result interpretation
 
-The tool distinguishes between:
+The script distinguishes outcomes such as:
 
-- `CONNECTION SUCCESSFUL`
-- `CONNECTION REFUSED`
-- `CONNECTION TIMED OUT`
-- `NETWORK UNREACHABLE (local)`
-- `NO ROUTE TO HOST`
-- `HOSTNAME RESOLUTION FAILURE`
-- `LOCAL TOOL FAILURE`
-- `INCONCLUSIVE`
+- TCP connection successful.
+- Connection refused.
+- Connection timed out.
+- Network unreachable or no route to host.
+- Hostname resolution failure.
+- Local diagnostic/tool failure.
+- Inconclusive result.
 
-**Important:** A timeout does not prove that a server is powered off. Firewalls, network filtering, server overload, unavailable services, and routing problems can produce similar symptoms.
+**A timeout is not proof that a server is down.** Firewalls, filtering, an overloaded server, a stalled service, or a network-path problem can all cause a probe not to receive a response. The tool reports what it can observe from the machine running it; it cannot determine the server's power state with certainty.
 
-The tool reports what it can establish from the machine running the diagnostic.
+A successful TCP connection confirms that the specified port accepted a connection. A passive SSH banner check does not verify authentication or prove that an SSH login will succeed.
 
 ## Exit codes
 
 | Code | Meaning |
 |---:|---|
-| 0 | TCP connection successful |
-| 1 | Connection refused |
-| 2 | Invalid input or usage |
-| 3 | Hostname resolution failure |
-| 4 | Local system or diagnostic problem |
-| 5 | No response or inconclusive result |
+| `0` | TCP connection successful |
+| `1` | Connection refused |
+| `2` | Invalid input or usage |
+| `3` | Hostname resolution failure |
+| `4` | Local diagnostic or system problem |
+| `5` | No response or inconclusive result |
 
-## Running tests
+## Tests
 
-The repository includes a basic automated test suite.
+Run the included test suite from the repository root:
 
 ```bash
-chmod +x test_host_check.sh
-./test_host_check.sh
+chmod +x tests/test_host_check.sh
+./tests/test_host_check.sh
 ```
 
-The tests use local loopback endpoints and do not intentionally contact external servers.
+The tests use local test endpoints and controlled test conditions. They do not replace testing in your own network environment.
 
 ## Limitations
 
-- Only the specified TCP port is tested; no port scanning is performed.
-- The default port is 22, but other ports can be supplied.
-- SSH banner detection does not verify authentication or successful login.
-- Only client-side network evidence is available.
+- Only the supplied TCP port is tested; there is no port scanning or automatic service discovery.
+- Port `22` is only the default. Supply another port when needed.
+- SSH banner detection is passive and does not test authentication.
+- Results are based on one network vantage point (the machine running the tool).
 - IPv6 behaviour has not been fully validated in the development environment.
-- A definitive diagnosis of server power state or firewall behaviour requires server-side or provider-side evidence.
+- Server-side evidence, such as console access, firewall logs, or server network captures, may be needed to determine why a host is unresponsive.
 
 ## Safety
 
-This is a read-only connectivity diagnostic utility.
-
-It does not:
-- Attempt SSH authentication.
-- Execute remote commands.
-- Change server configurations.
-- Modify firewall rules.
-- Restart services or servers.
-- Perform port scanning.
-- Install software.
-
-Use only against systems you are authorized to diagnose.
+Use this tool only on systems you are authorized to diagnose. It does not attempt authentication, execute remote commands, change server settings, modify firewall rules, restart services, or scan port ranges.
 
 ## License
 
-No license has been specified yet. Add a license before permitting others to redistribute or reuse this project.
+No license is included. Add a license if you intend to permit others to use, modify, or redistribute this project.
