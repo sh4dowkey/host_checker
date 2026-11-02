@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Host Check - Simple server accessibility diagnostic
-# Usage: ./host_check.sh <IP-or-hostname> [port]
+# Usage: hostcheck <IP-or-hostname> [port]\n# Reports: ~/.cache/hostcheck/reports/ (automatically pruned after 7 days)
 
 export LC_ALL=C
 
@@ -87,17 +87,31 @@ fi
 # ---------------- REPORT ----------------
 
 SAFE=$(printf '%s' "$TARGET" | tr -c 'A-Za-z0-9._-' '_')
-REPORT="host_check_${SAFE}_$(date +%Y%m%d_%H%M%S).txt"
 
-n=0
-while ! (set -o noclobber; : > "$REPORT") 2>/dev/null; do
-    ((n++))
-    REPORT="host_check_${SAFE}_$(date +%Y%m%d_%H%M%S)_$n.txt"
-    (( n <= 99 )) || {
-        REPORT=""
-        break
-    }
-done
+# Keep reports outside the project directory.
+REPORT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hostcheck/reports"
+REPORT=""
+
+if mkdir -p "$REPORT_DIR" 2>/dev/null && chmod 700 "$REPORT_DIR" 2>/dev/null; then
+    # Remove reports older than seven days each time hostcheck runs.
+    find "$REPORT_DIR" -maxdepth 1 -type f -name 'host_check_*.txt' -mmin +10080 -delete 2>/dev/null
+
+    REPORT="$REPORT_DIR/host_check_${SAFE}_$(date +%Y%m%d_%H%M%S).txt"
+
+    n=0
+    while ! (set -o noclobber; : > "$REPORT") 2>/dev/null; do
+        ((n++))
+        REPORT="$REPORT_DIR/host_check_${SAFE}_$(date +%Y%m%d_%H%M%S)_$n.txt"
+        if (( n > 99 )); then
+            REPORT=""
+            break
+        fi
+    done
+
+    [[ -n $REPORT ]] && chmod 600 "$REPORT" 2>/dev/null
+else
+    echo "Warning: could not create report directory; continuing without a report." >&2
+fi
 
 # ---------------- OUTPUT ENGINE ----------------
 
