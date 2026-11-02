@@ -1,274 +1,219 @@
 # HostCheck
 
-A small, read-only Bash utility for checking whether a host responds and whether one specified TCP port is reachable.
+A small Bash utility that checks whether a host is reachable and prints exactly one final status: **UP** or **DOWN**.
 
-It is designed for everyday Linux server troubleshooting. It uses Bash and common Linux utilities instead of requiring specialist network-scanning or packet-capture packages.
+- **UP**: at least one target check receives a response.
+- **DOWN**: none of the target checks receives a response.
 
-## 1. Download
+A failed ping alone does not make a host DOWN. If ping fails but the TCP port connects, the result is UP. The same applies if an HTTP(S) probe responds.
 
-### Option A — Download ZIP from GitHub
+## 1. Download the project
 
-1. Open the HostCheck repository page on GitHub.
-2. Click the green **Code** button.
-3. Select **Download ZIP**.
-4. Once downloaded, extract the ZIP file.
-5. Open a terminal in the extracted `host-check` project folder.
+### Download ZIP from GitHub (browser)
 
-If the extracted folder is in Downloads, for example:
+1. Open your HostCheck repository on GitHub.
+2. Click **Code** → **Download ZIP**.
+3. Extract the ZIP file.
+4. Open a terminal in the extracted project directory.
 
-```bash
-cd ~/Downloads/host-check
-```
+### Download ZIP from the terminal
 
-The folder name may differ depending on the repository name and ZIP filename.
-
-### Option B — Clone with Git
-
-If Git is installed, run this from the directory where you want the project:
+Replace `OWNER` and `REPOSITORY` with the GitHub account/organization and repository name:
 
 ```bash
-git clone <REPOSITORY-URL>
-cd <REPOSITORY-FOLDER>
+cd ~/Downloads
+curl -L "https://github.com/OWNER/REPOSITORY/archive/refs/heads/main.zip" -o hostcheck.zip
+unzip hostcheck.zip
 ```
 
-Replace the placeholders with the actual GitHub repository URL and folder name.
+If the repository's default branch is `master`, replace `main` with `master`.
+
+Then enter the extracted directory. Its name will normally be `REPOSITORY-main`:
+
+```bash
+cd REPOSITORY-main
+```
+
+If `curl` or `unzip` is unavailable, download the ZIP using the browser and extract it with your file manager.
+
+### Clone with Git instead
+
+Replace the URL with your repository's actual URL:
+
+```bash
+cd ~/Downloads
+git clone https://github.com/OWNER/REPOSITORY.git
+cd REPOSITORY
+```
 
 ## 2. Requirements
 
-Required:
+Required: Bash, `timeout`, `date`, `mktemp`, `awk`, `sed`, `grep`, `tr`, and `find`.
 
-- Bash 4 or newer
-- `timeout`
-- Common utilities: `date`, `mktemp`, `awk`, `sed`, `grep`, `tr`, `find`
+Optional checks use:
 
-Optional:
+- `ping` — ICMP reachability
+- `nc` (netcat) — TCP port connection
+- Bash `/dev/tcp` — TCP fallback if `nc` is unavailable
+- `getent` — hostname resolution
+- `curl` — extra HTTP(S) check for ports 80, 443, 8080, and 8443
 
-- `getent` for hostname resolution
-- `ip` for route, gateway, and neighbour information
-- `ping` for ICMP checks
-- `nc` as a fallback if Bash TCP support is unavailable
+The script does not install packages automatically and does not need root for normal use.
 
-No Nmap, tcpdump, Python, or package installation is required. Optional checks are skipped when their utilities are unavailable. The script does not require root privileges for normal use.
-
-## 3. Run directly
-
-From the project directory:
+## 3. Run it from the project folder
 
 ```bash
 chmod +x host_check.sh
 ./host_check.sh 192.168.1.100
+./host_check.sh 192.168.1.100 443
+./host_check.sh example.com 443
 ```
 
 Usage:
 
-```bash
+```text
 ./host_check.sh <IP-or-hostname> [port]
 ```
 
-Examples:
+The port defaults to `22` if omitted.
 
-```bash
-./host_check.sh 192.168.1.100
-./host_check.sh 192.168.1.100 2222
-./host_check.sh example.com
-./host_check.sh example.com 443
-```
+## 4. Install as a command available everywhere
 
-The port is optional and defaults to `22`. No flags, configuration files, or interactive prompts are required.
-
-## 4. Install as the `hostcheck` command
-
-This installs the script into your personal `~/.local/bin` directory. It does not require `sudo`.
-
-Run these commands from the directory containing `host_check.sh`:
+Run these commands from the folder containing `host_check.sh`:
 
 ```bash
 mkdir -p "$HOME/.local/bin"
 install -m 755 host_check.sh "$HOME/.local/bin/hostcheck"
-```
-
-Add that directory to your PATH. For Bash:
-
-```bash
 grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" || \
   echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The `export` command makes it available in the current terminal. The `.bashrc` change makes it available in future Bash terminals. Alternatively, open a new terminal or run:
-
-```bash
-source ~/.bashrc
-```
-
-If you use another shell, add the PATH line to that shell's startup file.
-
-Verify the installation:
+Verify:
 
 ```bash
 command -v hostcheck
 hostcheck 1.1.1.1
 ```
 
-You can now run it from any directory:
+After this, use it from any directory:
 
 ```bash
 hostcheck 192.168.1.100
-hostcheck 192.168.1.100 2222
-hostcheck example.com 443
+hostcheck 192.168.1.100 443
+hostcheck example.com 22
 ```
 
-### Updating the installed command
+## 5. How UP and DOWN are decided
 
-After downloading or pulling an updated version, go to the updated project directory and run:
+The final result has only two possible values.
 
-```bash
-install -m 755 host_check.sh "$HOME/.local/bin/hostcheck"
-```
+### UP
 
-This replaces the installed command with the updated script.
+The target is marked **UP** if any one of these checks succeeds:
 
-### Uninstalling
+1. Ping receives at least one reply.
+2. The selected TCP port accepts a connection using `nc`.
+3. The TCP fallback using Bash `/dev/tcp` connects.
+4. The optional HTTP(S) probe receives a response on supported web ports.
 
-```bash
-rm -f "$HOME/.local/bin/hostcheck"
-```
+Examples:
 
-This removes the installed command. It does not delete the project folder or saved reports.
+- Ping works, TCP fails → **UP**
+- Ping fails, TCP connects → **UP**
+- Ping and TCP fail, HTTP(S) responds → **UP**
+- Any one target check responds → **UP**
 
-## 5. What it checks
+### DOWN
 
-The script performs these checks in sequence:
+The target is marked **DOWN** only when none of the target checks receives a response.
 
-1. Validates the target and optional port.
-2. Resolves a hostname with `getent`, when the target is a hostname.
-3. Displays the local route using `ip route get`, when available.
-4. Sends three ICMP ping requests, with up to five seconds per request.
-5. Attempts a TCP connection to the selected port using Bash `/dev/tcp`, with a ten-second default timeout.
-6. If the TCP connection succeeds, passively waits briefly for a service banner. It recognises an SSH banner; it does not send a login or application request.
-7. If the TCP test times out or reports no route, waits ten seconds and retries once.
-8. Displays default-route, gateway, and ARP/NDP neighbour information where available.
-9. Prints a final summary and returns an exit status.
+**Important:** DOWN means no tested method received a response from this machine. It does not prove that the remote server is powered off. A firewall, network ACL, ICMP filtering, or routing issue can make a live server appear DOWN.
 
-The script does not scan other ports.
+The gateway is not counted as proof that the target is UP. A working gateway only proves that the local first hop responds.
 
-## 6. Output and reports
+## 6. Checks performed
 
-The terminal output uses color when run interactively:
+1. Validate target and port.
+2. Resolve hostname with `getent`, if needed.
+3. Ping the target three times.
+4. Test the selected TCP port with `nc`.
+5. Fall back to Bash `/dev/tcp` if needed.
+6. Retry a failed TCP test once after a short delay.
+7. If `curl` is available and the selected port is 80, 443, 8080, or 8443, try an HTTP(S) HEAD request.
+8. Print the final binary status and save a report.
 
-- **Cyan:** run header and interpretations
-- **Blue:** individual check headings
-- **Green:** successful checks
-- **Yellow:** inconclusive results and warnings
-- **Red:** connection failures and local errors
-- **Magenta:** final summary and conclusion
-- **Dim text:** commands and metadata
+Only the supplied TCP port is tested. The script does not scan a range of ports.
 
-Color is automatically disabled when output is redirected or piped. Set `NO_COLOR=1` to disable it manually:
+## 7. Reports
 
-```bash
-NO_COLOR=1 hostcheck 192.168.1.100
-```
-
-Saved reports contain plain text without terminal color codes. Each check displays the command executed, raw output, exit status, result, and a short interpretation.
-
-### Report location
-
-Reports are saved outside the project directory:
+Reports are saved outside the project folder:
 
 ```text
 ~/.cache/hostcheck/reports/
 ```
 
-If `XDG_CACHE_HOME` is set, the reports are saved under:
+If `XDG_CACHE_HOME` is set, that directory is used instead.
 
-```text
-$XDG_CACHE_HOME/hostcheck/reports/
-```
+Reports older than seven days are deleted when the script runs. The report directory is private (`700`) and report files are private (`600`).
 
-The script automatically removes its own report files older than seven days whenever it runs.
-
-- Report directory permissions: `700` (current user only)
-- Report file permissions: `600` (current user only)
-
-List saved reports:
+List reports:
 
 ```bash
 ls -lh "${XDG_CACHE_HOME:-$HOME/.cache}/hostcheck/reports/"
 ```
 
-Open the latest report:
+Open the newest report:
 
 ```bash
 latest=$(ls -t "${XDG_CACHE_HOME:-$HOME/.cache}"/hostcheck/reports/host_check_*.txt 2>/dev/null | head -n 1)
-if [ -n "$latest" ]; then
-    less "$latest"
-else
-    echo "No reports found."
-fi
+[ -n "$latest" ] && less "$latest"
 ```
 
 Press `q` to exit `less`.
 
-Reports may contain internal IP addresses, hostnames, routes, and infrastructure details. Review them before sharing.
+Reports can contain internal hostnames, IP addresses, and network information. Review them before sharing.
 
-## 7. Optional timeout tuning
+## 8. Optional timeout settings
 
-The defaults are three pings, a five-second per-ping wait, a ten-second TCP timeout, and one ten-second retry delay.
+Defaults: three pings, five seconds per ping, ten seconds per TCP attempt, and a five-second delay before the TCP retry.
 
-You can override the timing for one run with environment variables:
+Override them for one run:
 
 ```bash
-HC_PING_WAIT=3 HC_TCP_TIMEOUT=8 HC_RETRY_DELAY=5 hostcheck example.com 443
+HC_PING_WAIT=3 HC_TCP_TIMEOUT=8 HC_RETRY_DELAY=3 hostcheck example.com 443
 ```
-
-These settings affect only that invocation.
-
-## 8. Understanding the results
-
-The script distinguishes outcomes such as:
-
-- **Connection successful:** the TCP handshake completed on the selected port.
-- **Connection refused:** the connection was actively rejected by the target or an intervening device.
-- **Connection timed out:** no response arrived within the timeout.
-- **Network unreachable / no route:** the local system or a network device reported a routing or reachability problem.
-- **Hostname resolution failure:** the hostname could not be resolved.
-- **Local tool failure:** a required local diagnostic could not run correctly.
-- **Inconclusive:** available checks did not establish whether the service is reachable.
-
-**A timeout is not proof that a server is down.** Firewalls, filtering, an overloaded server, a stalled service, or a network-path problem can all prevent a response.
-
-A successful ping does not prove that a particular TCP port is open. ICMP may also be blocked while the TCP service is working.
-
-A successful TCP connection confirms that the selected port accepted a connection. A passive SSH banner check does not verify authentication or prove that an SSH login will succeed.
 
 ## 9. Exit codes
 
-| Code | Meaning |
+| Exit code | Meaning |
 |---:|---|
-| `0` | TCP connection successful |
-| `1` | Connection refused |
+| `0` | UP |
+| `1` | DOWN |
 | `2` | Invalid input or usage |
-| `3` | Hostname resolution failure |
-| `4` | Local diagnostic or system problem |
-| `5` | No response or inconclusive result |
+| `4` | Local setup error, such as inability to create a temporary file |
 
-## 10. Limitations
+## 10. Update and uninstall
 
-- Only the supplied TCP port is tested; there is no port scanning or automatic service discovery.
-- Port `22` is the default. Supply another port when needed.
-- SSH banner detection is passive and does not test authentication.
-- Results are based on the network path from the machine running the tool.
-- IPv6 behaviour may depend on the available local utilities and has not been fully validated in every environment.
-- Server-side evidence, such as console access, firewall logs, or packet captures on the server, may be needed to determine why a host is unresponsive.
+To update the installed command, download/extract the latest project version, enter its directory, and run:
 
-## 11. Safety
+```bash
+install -m 755 host_check.sh "$HOME/.local/bin/hostcheck"
+```
 
-Use this tool only on systems you are authorized to diagnose.
+To uninstall the command:
 
-It does not attempt authentication, execute remote commands, change server settings, modify firewall rules, restart services, or scan port ranges.
+```bash
+rm -f "$HOME/.local/bin/hostcheck"
+```
 
-## 12. License
+This does not delete the project folder or reports.
 
-No license is included. Add a license if you intend to permit others to use, modify, or redistribute this project.
+## 11. Safety and limitations
+
+- The script performs read-only network checks.
+- It does not authenticate, run remote commands, change server configuration, or modify firewall rules.
+- It checks only the specified TCP port, not every port.
+- ICMP may be blocked even when a server is healthy.
+- A firewall may drop TCP probes, so a DOWN result is not conclusive proof of server failure.
+- Use it only on systems you are authorized to diagnose.
